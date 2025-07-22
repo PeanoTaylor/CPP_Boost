@@ -70,13 +70,13 @@ int TaskQueue::pop(){
  * @return bool
  */
 bool TaskQueue::empty() {
-    return false;
+    return m_queue.size() == 0;
 }
 
 /**
  * @return bool
  */
 bool TaskQueue::full() {
-    return false;
+    return m_queue.size() == m_capacity;
 }
 
