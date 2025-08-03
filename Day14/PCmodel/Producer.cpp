@@ -14,7 +14,7 @@
  * @param taskQue
  * @return void
  */
-
+mutex coutMtx;
 void Producer::produce(TaskQueue & taskQue) {
     srand(clock());
     int cnt = 20;
