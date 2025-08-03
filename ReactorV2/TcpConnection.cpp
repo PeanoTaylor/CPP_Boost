@@ -12,7 +12,7 @@
  * @param fd
  */
 TcpConnection::TcpConnection(int fd)
-    : _sockIO(fd), _sock(fd), _localAddr(getLocalAddr()), _peerAddr(getPeerAddr())
+    : _sock(fd), _sockIO(fd), _localAddr(getLocalAddr()), _peerAddr(getPeerAddr())
 {
 }
 

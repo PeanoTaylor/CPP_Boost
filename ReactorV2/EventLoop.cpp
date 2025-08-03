@@ -11,12 +11,9 @@
 /**
  * @param acc
  */
-EventLoop::EventLoop(Acceptor &acc)
-        : _epfd(createEpollFd())
-        , _evlist(OPEN_MAX)
-        , _isLooping(false)
-        , _acceptor(acc){
-        addEpollReadFd(_acceptor.getFd());
+EventLoop::EventLoop(Acceptor &acc) : _epfd(createEpollFd()), _isLooping(false), _acceptor(acc), _evlist(OPEN_MAX)
+{
+    addEpollReadFd(_acceptor.getFd());
 }
 
 EventLoop::~EventLoop()
@@ -49,11 +46,10 @@ void EventLoop::unloop()
  */
 int EventLoop::createEpollFd()
 {
-
-    _epfd = epoll_create(OPEN_MAX); // 创建红黑树的根节点（使用数据结构：红黑树 + 就绪链表）
-    if (_epfd == -1)
+    _epfd = epoll_create(OPEN_MAX);
+    if (_epfd < 0)
     {
-        perror("epoll_create");
+        perror("epoll create");
         exit(EXIT_FAILURE);
     }
     return _epfd;
@@ -62,12 +58,14 @@ int EventLoop::createEpollFd()
 /**
  * @return void
  */
-void EventLoop::addEpollReadFd(int fd)
+void EventLoop::addEpollReadFd(int fd) // 注册新会话连接
 {
     struct epoll_event ev;
-    ev.events = EPOLLIN;
     ev.data.fd = fd;
-    if (epoll_ctl(_epfd, EPOLL_CTL_ADD, fd, &ev) < 0)
+    ev.events = EPOLLIN;
+    int ret = epoll_ctl(_epfd, EPOLL_CTL_ADD, fd, &ev);
+    cout << ret << endl;
+    if (ret < 0)
     {
         perror("epoll_ctl ADD");
         exit(EXIT_FAILURE);
@@ -79,7 +77,8 @@ void EventLoop::addEpollReadFd(int fd)
  */
 void EventLoop::delEpollReadFd(int fd)
 {
-    if (epoll_ctl(_epfd, EPOLL_CTL_DEL, _acceptor.getFd(), nullptr) < 0)
+    int ret = epoll_ctl(_epfd, EPOLL_CTL_DEL, fd, nullptr);
+    if (ret < 0)
     {
         perror("epoll_ctl DEL");
         exit(EXIT_FAILURE);
@@ -93,7 +92,7 @@ void EventLoop::waitEpollFd()
 {
     struct epoll_event ep[OPEN_MAX];
     int nready = epoll_wait(_epfd, ep, OPEN_MAX, -1);
-    if (nready == -1)
+    if (nready < 0)
     {
         perror("epoll_wait");
         exit(EXIT_FAILURE);
@@ -101,13 +100,14 @@ void EventLoop::waitEpollFd()
 
     for (int i = 0; i < nready; ++i)
     {
+        // 异常处理
         if (!(ep[i].events & EPOLLIN))
         {
-            continue; // 信号中断可重试
+            continue;
         }
 
         if (ep[i].data.fd == _acceptor.getFd())
-        {
+        { // 新的连接
             handleNewConnection();
         }
         else
@@ -123,9 +123,9 @@ void EventLoop::waitEpollFd()
 void EventLoop::handleNewConnection()
 {
     int connfd = _acceptor.accept();
-    if (connfd < 0)
+    if (connfd < 0) 
     {
-        perror("accept error");
+        perror("accept");
         exit(EXIT_FAILURE);
     }
 
@@ -147,9 +147,9 @@ void EventLoop::handleMessage(int fd)
         if (msg.empty())
         {
             delEpollReadFd(fd);
-            _conns.erase(fd);
+            _conns.erase(it);
             close(fd);
-            cout << "client " << fd << " closed." << endl;
+            cout << "client " << fd << " has disconnect " << endl;
         }
         else
         {

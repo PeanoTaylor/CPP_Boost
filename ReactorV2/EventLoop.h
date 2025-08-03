@@ -10,12 +10,10 @@
 #include <vector>
 #include <memory>
 #include <map>
-#include <sys/epoll.h>
-using std::map;
+using std::vector;
 using std::shared_ptr;
 using std::make_shared;
-using std::vector;
-
+using std::map;
 #define OPEN_MAX 1024
 class EventLoop {
 public: 

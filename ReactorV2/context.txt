@@ -1,0 +1,899 @@
+/**
+ * Project 66th
+ */
+
+#include "Acceptor.h"
+
+/**
+ * Acceptor implementation
+ */
+
+/**
+ * @param ip
+ * @param port
+ */
+Acceptor::Acceptor(const string &ip, unsigned short port)
+    : _sock(), _addr(ip, port) {}
+
+Acceptor::~Acceptor()
+{
+}
+
+/**
+ * @return void
+ */
+void Acceptor::ready()
+{
+    setReuseAddr();
+    setReusePort();
+    bind();
+    listen();
+}
+
+/**
+ * @return int
+ */
+int Acceptor::accept()
+{
+    int connfd = ::accept(_sock.getFd(), nullptr, nullptr);
+    if (connfd < 0)
+    {
+        perror("accept");
+    }
+    return connfd;
+}
+
+/**
+ * @return void
+ */
+void Acceptor::setReuseAddr()
+{
+    int flag = 1;
+    setsockopt(_sock.getFd(), SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(flag));
+}
+
+/**
+ * @return void
+ */
+void Acceptor::setReusePort()
+{
+    int flag = 1;
+    setsockopt(_sock.getFd(), SOL_SOCKET, SO_REUSEPORT, &flag, sizeof(flag));
+}
+
+/**
+ * @return void
+ */
+void Acceptor::bind()
+{
+    if (::bind(_sock.getFd(), (struct sockaddr *)_addr.getInetAddressPtr(), sizeof(struct sockaddr_in)) < 0)
+    {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
+}
+
+/**
+ * @return void
+ */
+void Acceptor::listen()
+{
+    if (::listen(_sock.getFd(), 128) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+}/**
+ * Project 66th
+ */
+
+#ifndef _ACCEPTOR_H
+#define _ACCEPTOR_H
+#include <string>
+#include "Socket.h"
+#include "InetAddress.h"
+using std::string;
+class Acceptor
+{
+public:
+    /**
+     * @param ip
+     * @param port
+     */
+    Acceptor(const string &ip, unsigned short port);
+
+    ~Acceptor();
+
+    void ready();
+
+    int accept();
+
+    int getFd() { return _sock.getFd(); }
+
+private:
+    Socket _sock;
+    InetAddress _addr;
+
+    void setReuseAddr();
+
+    void setReusePort();
+
+    void bind();
+
+    void listen();
+};
+
+#endif //_ACCEPTOR_H#include <iostream>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <cstring>
+using std::cin;
+using std::cout;
+using std::endl;
+int main()
+{
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in serv_addr;
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(22222);
+    serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    int ret = connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr));
+
+    if (ret < 0)
+    {
+        perror("connect");
+        exit(EXIT_FAILURE);
+    }
+
+    char buf[1024];
+    while (true)
+    {
+        // send
+        cin.getline(buf, sizeof(buf));
+        if (strlen(buf) == 0)
+            break;
+        int ret = send(sockfd, buf, strlen(buf), 0);
+        if (ret == -1)
+        {
+            perror("send");
+        }
+        // recv
+        char buf[1024];
+        int n = recv(sockfd, buf, sizeof(buf), 0);
+        if (n == -1)
+        {
+            perror("recv");
+        }
+        else if (n == 0)
+        {
+            printf("peer closed\n");
+        }
+        else
+        {
+            buf[n] = '\0'; // 如果是字符串
+            cout << ">>recv msg from server: " << buf << endl;
+        }
+        }
+
+    close(sockfd);
+    return 0;
+}
+/**
+ * Project 66th
+ */
+
+#include "EventLoop.h"
+
+/**
+ * EventLoop implementation
+ */
+
+/**
+ * @param acc
+ */
+EventLoop::EventLoop(Acceptor &acc) : _epfd(createEpollFd()), _isLooping(false), _acceptor(acc), _evlist(OPEN_MAX)
+{
+    addEpollReadFd(_acceptor.getFd());
+}
+
+EventLoop::~EventLoop()
+{
+    close(_epfd);
+}
+
+/**
+ * @return void
+ */
+void EventLoop::loop()
+{
+    _isLooping = true;
+    while (_isLooping)
+    {
+        waitEpollFd();
+    }
+}
+
+/**
+ * @return void
+ */
+void EventLoop::unloop()
+{
+    _isLooping = false;
+}
+
+/**
+ * @return int
+ */
+int EventLoop::createEpollFd()
+{
+    _epfd = epoll_create(OPEN_MAX);
+    if (_epfd < 0)
+    {
+        perror("epoll create");
+        exit(EXIT_FAILURE);
+    }
+    return _epfd;
+}
+
+/**
+ * @return void
+ */
+void EventLoop::addEpollReadFd(int fd) // 注册新会话连接
+{
+    struct epoll_event ev;
+    ev.data.fd = fd;
+    ev.events = EPOLLIN;
+    int ret = epoll_ctl(_epfd, EPOLL_CTL_ADD, fd, &ev);
+    cout << ret << endl;
+    if (ret < 0)
+    {
+        perror("epoll_ctl ADD");
+        exit(EXIT_FAILURE);
+    }
+}
+
+/**
+ * @return void
+ */
+void EventLoop::delEpollReadFd(int fd)
+{
+    int ret = epoll_ctl(_epfd, EPOLL_CTL_DEL, fd, nullptr);
+    if (ret < 0)
+    {
+        perror("epoll_ctl DEL");
+        exit(EXIT_FAILURE);
+    }
+}
+
+/**
+ * @return void
+ */
+void EventLoop::waitEpollFd()
+{
+    struct epoll_event ep[OPEN_MAX];
+    int nready = epoll_wait(_epfd, ep, OPEN_MAX, -1);
+    if (nready < 0)
+    {
+        perror("epoll_wait");
+        exit(EXIT_FAILURE);
+    }
+
+    for (int i = 0; i < nready; ++i)
+    {
+        // 异常处理
+        if (!(ep[i].events & EPOLLIN))
+        {
+            continue;
+        }
+
+        if (ep[i].data.fd == _acceptor.getFd())
+        { // 新的连接
+            handleNewConnection();
+        }
+        else
+        {
+            handleMessage(ep[i].data.fd);
+        }
+    }
+}
+
+/**
+ * @return void
+ */
+void EventLoop::handleNewConnection()
+{
+    int connfd = _acceptor.accept();
+    if (connfd < 0)
+    {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
+
+    addEpollReadFd(connfd);
+    _conns[connfd] = make_shared<TcpConnection>(connfd);
+    cout << "new client: " << _conns[connfd]->toString() << endl;
+}
+
+/**
+ * @param fd
+ * @return void
+ */
+void EventLoop::handleMessage(int fd)
+{
+    auto it = _conns.find(fd);
+    if (it != _conns.end())
+    {
+        string msg = it->second->receive();
+        if (msg.empty())
+        {
+            delEpollReadFd(fd);
+            _conns.erase(it);
+            close(fd);
+            cout << "client " << fd << " has disconnect " << endl;
+        }
+        else
+        {
+            cout << "recv from client " << fd << ": " << msg << endl;
+            it->second->send(msg);
+        }
+    }
+}/**
+ * Project 66th
+ */
+
+
+#ifndef _EVENTLOOP_H
+#define _EVENTLOOP_H
+#include "Acceptor.h"
+#include "TcpConnection.h"
+#include <vector>
+#include <memory>
+#include <map>
+using std::vector;
+using std::shared_ptr;
+using std::make_shared;
+using std::map;
+#define OPEN_MAX 1024
+class EventLoop {
+public: 
+    
+/**
+ * @param acc
+ */
+EventLoop(Acceptor & acc);
+    
+~EventLoop();
+    
+void loop();
+    
+void unloop();
+private: 
+    int _epfd;
+    vector<struct epoll_event> _evlist;
+    bool _isLooping;
+    Acceptor & _acceptor;
+    map<int,shared_ptr<TcpConnection>> _conns;
+    
+int createEpollFd();
+    
+void addEpollReadFd(int fd);
+    
+void delEpollReadFd(int fd);
+    
+void waitEpollFd();
+    
+void handleNewConnection();
+    
+/**
+ * @param fd
+ */
+void handleMessage(int fd);
+};
+
+#endif //_EVENTLOOP_H/**
+ * Project 66th
+ */
+
+#include "InetAddress.h"
+
+/**
+ * InetAddress implementation
+ */
+
+/**
+ * @param ip
+ * @param port
+ */
+InetAddress::InetAddress(const string &ip, unsigned short port)
+{
+    _addr.sin_family = AF_INET;
+    _addr.sin_port = htons(port);
+    _addr.sin_addr.s_addr = inet_addr(ip.c_str());
+}
+
+/**
+ * @param addr
+ */
+InetAddress::InetAddress(const struct sockaddr_in &addr)
+{
+    _addr = addr;
+}
+
+InetAddress::~InetAddress()
+{
+}
+
+/**
+ * @return string
+ */
+string InetAddress::getIp()
+{
+    return string(inet_ntoa(_addr.sin_addr));//网络字节序转为x.x.x.x
+}
+
+/**
+ * @return unsigned short
+ */
+unsigned short InetAddress::getPort()
+{
+    return ntohs(_addr.sin_port);//网络字节序转为主机字节序
+}
+
+/**
+ * @return struct sockaddr_in *
+ */
+struct sockaddr_in *InetAddress::getInetAddressPtr()
+{
+    return &_addr;
+}/**
+ * Project 66th
+ */
+
+#ifndef _INETADDRESS_H
+#define _INETADDRESS_H
+#include <iostream>
+#include <string>
+#include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/epoll.h>
+using std::cout;
+using std::endl;
+using std::string;
+class InetAddress
+{
+public:
+    /**
+     * @param ip
+     * @param port
+     */
+    InetAddress(const string &ip, unsigned short port);
+
+    /**
+     * @param addr
+     */
+    InetAddress(const struct sockaddr_in &addr);
+
+    ~InetAddress();
+
+    string getIp();
+
+    unsigned short getPort();
+
+    struct sockaddr_in *getInetAddressPtr();
+
+private:
+    struct sockaddr_in _addr;
+};
+
+#endif //_INETADDRESS_H// NonCopyable.h
+#ifndef _NONCOPYABLE_H
+#define _NONCOPYABLE_H
+class NonCopyable {
+protected:
+    NonCopyable() = default;
+    ~NonCopyable() = default;
+    NonCopyable(const NonCopyable&) = delete;
+    NonCopyable& operator=(const NonCopyable&) = delete;
+};
+#endif //_NONCOPYABLE_H
+#include "Acceptor.h"
+#include "EventLoop.h"
+
+int main()
+{
+    Acceptor acceptor("127.0.0.1", 22222);
+    acceptor.ready();
+
+    EventLoop loop(acceptor);
+    loop.loop();  // 支持多客户端并发交互
+
+    return 0;
+}
+/**
+ * Project 66th
+ */
+
+#include "Socket.h"
+
+/**
+ * Socket implementation
+ */
+
+Socket::Socket()
+{
+    _fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(_fd < 0){
+        perror("socket");
+        return;
+    }
+}
+
+/**
+ * @param fd
+ */
+Socket::Socket(int fd)
+{
+    _fd = fd;
+}
+
+Socket::~Socket()
+{
+}
+
+/**
+ * @return int
+ */
+int Socket::getFd()
+{
+    return _fd;
+}/**
+ * Project 66th
+ */
+
+#ifndef _SOCKET_H
+#define _SOCKET_H
+
+#include "NonCopyable.h"
+#include <sys/types.h> 
+#include <sys/socket.h>
+#include <iostream>
+
+class Socket : public NonCopyable
+{
+public:
+    Socket();
+
+    /**
+     * @param fd
+     */
+    explicit Socket(int fd);// 避免隐式转换
+
+    ~Socket();
+
+    int getFd();
+
+private:
+    int _fd;
+};
+
+#endif //_SOCKET_H/**
+ * Project 66th
+ */
+
+#include "SocketIO.h"
+
+/**
+ * SocketIO implementation
+ */
+
+/**
+ * @param fd
+ */
+SocketIO::SocketIO(int fd) : _fd(fd)
+{
+}
+
+SocketIO::~SocketIO()
+{
+    //close(_fd);避免double free
+}
+
+/**
+ * @param buf
+ * @param len
+ * @return int
+ */
+int SocketIO::readn(char *buf, int len)
+{
+    int left = len; // 剩余要读取的字节
+    char *pstr = buf;
+    while (left > 0)
+    {
+        int nread = read(_fd, pstr, left);
+        if (nread == 0)
+        {
+            break; // 对端关闭
+        }
+        else if (-1 == nread && errno == EINTR) // 对当前进程（线程）而言发生了中断//中断触发，导致CPU的使用权被抢夺，后续应该继续执行
+        {
+            continue;
+        }
+        else
+        {
+            left -= nread;
+            pstr += nread;
+        }
+    }
+    return len - left;
+}
+
+/**
+ * @param buf
+ * @param len
+ * @return int
+ */
+int SocketIO::readLine(char *buf, int len)
+{
+    int total = 0, ret = 0;
+    int left = len - 1;// 预留1字节放字符串结尾'\0'
+
+    char *pstr = buf;
+    while (left > 0)
+    {
+        ret = recv(_fd, pstr, left, MSG_PEEK);// 尝试窥探缓冲区，非实际读出,避免拆包/粘包
+        if (ret == 0)
+        {
+            break; // 对端关闭
+        }
+        else if (ret == -1 && errno == EINTR)
+        {
+            continue; // 对当前进程（线程）而言发生了中断//中断触发，导致CPU的使用权被抢夺，后续应该继续执行
+        }
+        else if (ret == -1)
+        {
+            perror("readline");
+            return -1;
+        }
+        else// peek到数据，查找有没有 '\n'
+        {
+            int idx = 0;
+            for (; idx < ret; ++idx)
+            {
+                if (pstr[idx] == '\n')
+                {
+                    int sz = idx + 1;// 要读取的实际字节数
+                    // 实际读走这一行（把socket缓冲区“消费掉”）
+                    if (readn(pstr, sz) != sz)
+                        return -1;
+                    pstr += sz;
+                    total += sz;
+                    *pstr = '\0';
+                    return total;
+                }
+            }
+            // 4. 没有找到\n，把peek到的全都读出来
+            if (readn(pstr, ret) != ret)
+                return -1;
+            pstr += ret;
+            left -= ret;
+            total += ret;
+        }
+    }
+    *pstr = '\0';
+    return total;
+}
+
+/**
+ * @param buf
+ * @param len
+ * @return int
+ */
+int SocketIO::writen(char *buf, int len)
+{
+    int left = len; // 剩余要读取的字节
+    char *pstr = buf;
+    while (left > 0)
+    {
+        int nwrite = write(_fd, pstr, left);
+        if (nwrite == 0)
+        {
+            break; // 对端关闭
+        }
+        else if (-1 == nwrite && errno == EINTR) // 对当前进程（线程）而言发生了中断//中断触发，导致CPU的使用权被抢夺，后续应该继续执行
+        {
+            continue;
+        }
+        else
+        {
+            left -= nwrite;
+            pstr += nwrite;
+        }
+    }
+    return len;
+}/**
+ * Project 66th
+ */
+
+
+#ifndef _SOCKETIO_H
+#define _SOCKETIO_H
+#include <string>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/socket.h>
+using std::string;
+class SocketIO {
+public: 
+    
+/**
+ * @param fd
+ */
+explicit SocketIO(int fd);
+    
+~SocketIO();
+    
+/**
+ * @param buf
+ * @param len
+ */
+int readn(char * buf, int len);
+    
+/**
+ * @param buf
+ * @param len
+ */
+int readLine(char * buf, int len);
+    
+/**
+ * @param buf
+ * @param len
+ */
+int writen(char * buf, int len);
+private: 
+    int _fd;
+};
+
+#endif //_SOCKETIO_H/**
+ * Project 66th
+ */
+
+#include "TcpConnection.h"
+
+/**
+ * TcpConnection implementation
+ */
+
+/**
+ * @param fd
+ */
+TcpConnection::TcpConnection(int fd)
+    : _sock(fd), _sockIO(fd), _localAddr(getLocalAddr()), _peerAddr(getPeerAddr())
+{
+}
+
+TcpConnection::~TcpConnection(){}
+
+/**
+ * @return string
+ */
+string TcpConnection::receive()
+{
+    char buf[65535] = {0};
+    int ret = _sockIO.readLine(buf, sizeof(buf));
+    if (ret > 0)
+    {
+        return string(buf);
+    }
+    else
+    {
+        // 读到0表示对端关闭，<0表示出错
+        return string();
+    }
+}
+
+/**
+ * @param msg
+ * @return void
+ */
+void TcpConnection::send(const string &msg)
+{
+    _sockIO.writen(const_cast<char *>(msg.c_str()), msg.size());
+}
+
+/**
+ * @return string
+ */
+string TcpConnection::toString()
+{
+    ostringstream oss;
+    oss << _localAddr.getIp() << ":" << _localAddr.getPort() << "->" << _peerAddr.getIp() << ":" << _peerAddr.getPort();
+    return oss.str();
+}
+
+/**
+ * @return InetAddress
+ */
+// 获取本端的网络地址信息
+InetAddress TcpConnection::getLocalAddr()
+{
+    struct sockaddr_in localaddr;
+    socklen_t addrlen = sizeof(localaddr);
+    // 获取本端地址的函数getsockname
+    int ret = getsockname(_sock.getFd(), (struct sockaddr *)&localaddr, &addrlen);
+    if (ret < 0)
+    {
+        perror("getsockname");
+    }
+
+    return InetAddress(localaddr);
+}
+
+/**
+ * @return InetAddress
+ */
+// 获取对端地址的函数getsockname
+InetAddress TcpConnection::getPeerAddr()
+{
+    struct sockaddr_in peeraddr;
+    socklen_t addrlen = sizeof(peeraddr);
+    // 获取对端地址的函数getsockname
+    int ret = getpeername(_sock.getFd(), (struct sockaddr *)&peeraddr, &addrlen);
+    if (ret < 0)
+    {
+        perror("getpeername");
+    }
+
+    return InetAddress(peeraddr);
+}/**
+ * Project 66th
+ */
+
+#ifndef _TCPCONNECTION_H
+#define _TCPCONNECTION_H
+#include "SocketIO.h"
+#include "Socket.h"
+#include "InetAddress.h"
+#include <string>
+#include <sstream>
+using std::string;
+using std::ostringstream;
+class TcpConnection
+{
+public:
+    /**
+     * @param fd
+     */
+    explicit TcpConnection(int fd);
+
+    ~TcpConnection();
+
+    string receive();
+
+    /**
+     * @param msg
+     */
+    void send(const string &msg);
+
+    string toString();
+
+private:
+    SocketIO _sockIO;
+    Socket _sock;
+    InetAddress _localAddr;
+    InetAddress _peerAddr;
+
+    InetAddress getLocalAddr();
+
+    InetAddress getPeerAddr();
+};
+
+#endif //_TCPCONNECTION_H

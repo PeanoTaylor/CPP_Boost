@@ -20,19 +20,36 @@ int main()
         perror("connect");
         exit(EXIT_FAILURE);
     }
-    
+
     char buf[1024];
     while (true)
     {
+        // send
         cin.getline(buf, sizeof(buf));
         if (strlen(buf) == 0)
             break;
-        write(sockfd, buf, strlen(buf));
-        write(sockfd, "\n", 1); // 保证服务端能正确readLine
-        int n = read(sockfd, buf, sizeof(buf) - 1);
-        buf[n] = '\0';
-        cout << ">>recv msg from server: " << buf << endl;
-    }
+        int ret = send(sockfd, buf, strlen(buf), 0);
+        if (ret == -1)
+        {
+            perror("send");
+        }
+        // recv
+        char buf[1024];
+        int n = recv(sockfd, buf, sizeof(buf), 0);
+        if (n == -1)
+        {
+            perror("recv");
+        }
+        else if (n == 0)
+        {
+            printf("peer closed\n");
+        }
+        else
+        {
+            buf[n] = '\0'; // 如果是字符串
+            cout << ">>recv msg from server: " << buf << endl;
+        }
+        }
 
     close(sockfd);
     return 0;
